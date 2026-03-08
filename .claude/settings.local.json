@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip show yt-dlp customtkinter)",
+      "Bash(pip show yt-dlp)",
+      "Bash(pip install yt-dlp)",
+      "Bash(where ffmpeg)",
+      "Bash(pip install yt-dlp --user)",
+      "Bash(python -c \"import yt_dlp; print\\(''yt-dlp OK:'', yt_dlp.version.__version__\\)\")",
+      "Bash(pip install imageio-ffmpeg --user)",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"from PIL import Image; print\\(''Pillow OK''\\)\")"
+    ]
+  }
+}

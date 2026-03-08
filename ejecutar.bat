@@ -1,0 +1,3 @@
+@echo off
+echo Iniciando YouTube Downloader...
+python main.py
