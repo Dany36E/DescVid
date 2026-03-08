@@ -89,8 +89,15 @@ async def api_info(
     _check_rate(request.client.host)
 
     def extract():
+        # First pass: flat extract to detect playlist quickly
         with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True,
                                 "extract_flat": "in_playlist"}) as ydl:
+            return ydl.extract_info(url, download=False)
+
+    def extract_video():
+        # Full extract of the single video (no playlist)
+        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True,
+                                "noplaylist": True}) as ydl:
             return ydl.extract_info(url, download=False)
 
     try:
@@ -99,36 +106,30 @@ async def api_info(
         raise HTTPException(400, "Could not retrieve video info — check the URL")
 
     is_pl = "entries" in info
-    formats_raw = info.get("formats") or []
+    playlist_count = len(list(info.get("entries") or [])) if is_pl else 0
+    playlist_title = info.get("title", "—") if is_pl else None
 
-    available = []
-    seen = set()
-    for f in formats_raw:
-        label = f.get("format_note") or f.get("format") or ""
-        ext = f.get("ext", "")
-        h = f.get("height")
-        abr = f.get("abr")
-        entry_key = f"{label}-{ext}"
-        if entry_key in seen:
-            continue
-        seen.add(entry_key)
-        available.append({
-            "format_id": f.get("format_id", ""),
-            "ext": ext,
-            "resolution": f"{h}p" if h else None,
-            "abr": f"{abr}kbps" if abr else None,
-            "note": label,
-        })
+    # If it's a playlist URL, also fetch the individual video info
+    if is_pl:
+        try:
+            video_info = await asyncio.get_event_loop().run_in_executor(None, extract_video)
+        except Exception:
+            video_info = None
+    else:
+        video_info = info
+
+    # Use video-level info for display, fall back to playlist info
+    display = video_info if video_info else info
 
     return {
-        "title": info.get("title", "—"),
-        "channel": info.get("channel") or info.get("uploader", "—"),
-        "duration": info.get("duration") or 0,
-        "duration_str": _fmt_duration(info.get("duration")),
-        "thumbnail": info.get("thumbnail", ""),
+        "title": display.get("title", "—"),
+        "channel": display.get("channel") or display.get("uploader", "—"),
+        "duration": display.get("duration") or 0,
+        "duration_str": _fmt_duration(display.get("duration")),
+        "thumbnail": display.get("thumbnail", ""),
         "is_playlist": is_pl,
-        "playlist_count": len(list(info.get("entries") or [])) if is_pl else 0,
-        "formats": available,
+        "playlist_count": playlist_count,
+        "playlist_title": playlist_title,
     }
 
 
@@ -138,6 +139,7 @@ async def api_info(
 async def api_download(
     url: str = Query(..., min_length=1),
     format: str = Query("mp4", pattern="^(mp4|mp3)$"),
+    no_playlist: bool = Query(True),
     key: str = Query(...),
     request: Request = None,
 ):
@@ -154,7 +156,7 @@ async def api_download(
             "outtmpl": outtmpl,
             "quiet": True,
             "no_warnings": True,
-            "noplaylist": True,
+            "noplaylist": no_playlist,
             "retries": 5,
             "restrictfilenames": False,
         }

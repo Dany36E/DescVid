@@ -282,6 +282,18 @@ input  { font: inherit; border: none; background: none; color: inherit; outline:
 }
 .dl-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+/* ── Playlist banner ─────────────────────────────────────────────────────── */
+#playlistToggle { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.playlist-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 10px;
+  background: var(--accent-bg); border: 1px solid rgba(255,45,45,0.15);
+}
+.playlist-banner__icon { font-size: 20px; }
+.playlist-banner__body { display: flex; flex-direction: column; gap: 2px; }
+.playlist-banner__label { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 480px; }
+.playlist-banner__sub { font-size: 12px; color: var(--text-2); }
+
 /* ── Progress ───────────────────────────────────────────────────────────── */
 .progress__status { font-size: 14px; color: var(--text-2); margin-bottom: 12px; }
 .progress-track {

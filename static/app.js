@@ -8,8 +8,7 @@
   /* ── State ──────────────────────────────────────────────────────────────── */
   let format       = "mp4";
   let videoInfo    = null;
-  let downloading  = false;
-
+  let downloading  = false;  let noPlaylist   = true;  // default: solo este video
   /* ── DOM refs ───────────────────────────────────────────────────────────── */
   const $ = (s) => document.querySelector(s);
 
@@ -29,6 +28,9 @@
   const progressStatus = $("#progressStatus");
   const themeToggle    = $("#themeToggle");
   const toasts         = $("#toasts");
+  const playlistToggle = $("#playlistToggle");
+  const playlistChips  = $("#playlistChips");
+  const playlistLabel  = $("#playlistLabel");
 
   /* ── Init ───────────────────────────────────────────────────────────────── */
   function init() {
@@ -53,6 +55,17 @@
     formatChips.addEventListener("click", (e) => {
       const chip = e.target.closest(".chip");
       if (chip) setFormat(chip.dataset.value);
+    });
+
+    playlistChips.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      noPlaylist = chip.dataset.value === "video";
+      playlistChips.querySelectorAll(".chip").forEach((c) => {
+        const active = c.dataset.value === chip.dataset.value;
+        c.classList.toggle("chip--active", active);
+        c.setAttribute("aria-checked", active);
+      });
     });
   }
 
@@ -106,9 +119,25 @@
     $("#previewDuration").textContent = info.duration_str || "";
 
     const metaParts = [];
-    if (info.duration_str) metaParts.push(info.duration_str);
+    if (info.duration_str && info.duration_str !== "0:00") metaParts.push(info.duration_str);
     if (info.is_playlist) metaParts.push(`Playlist: ${info.playlist_count} videos`);
     $("#previewMeta").textContent = metaParts.join("  ·  ");
+
+    // Show/hide playlist toggle
+    if (info.is_playlist) {
+      playlistLabel.textContent = `"${info.playlist_title || "Playlist"}" — ${info.playlist_count} videos`;
+      playlistToggle.hidden = false;
+      // Reset to "solo este video" by default
+      noPlaylist = true;
+      playlistChips.querySelectorAll(".chip").forEach((c) => {
+        const active = c.dataset.value === "video";
+        c.classList.toggle("chip--active", active);
+        c.setAttribute("aria-checked", active);
+      });
+    } else {
+      playlistToggle.hidden = true;
+      noPlaylist = true;
+    }
 
     previewCard.hidden = false;
     previewCard.classList.remove("anim-entry");
@@ -155,7 +184,7 @@
     progressFill.classList.add("progress-fill--indeterminate");
 
     try {
-      const params = new URLSearchParams({ url, format, key });
+      const params = new URLSearchParams({ url, format, no_playlist: noPlaylist, key });
       const response = await fetch(`/api/download?${params}`);
 
       if (!response.ok) {

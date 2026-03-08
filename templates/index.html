@@ -93,6 +93,25 @@
           </div>
         </div>
       </div>
+
+      <!-- Playlist toggle — solo visible si la URL es una playlist -->
+      <div id="playlistToggle" hidden>
+        <div class="playlist-banner">
+          <span class="playlist-banner__icon">&#127916;</span>
+          <div class="playlist-banner__body">
+            <span class="playlist-banner__label" id="playlistLabel">Playlist detectada</span>
+            <span class="playlist-banner__sub">¿Qué quieres descargar?</span>
+          </div>
+        </div>
+        <div class="chip-group" id="playlistChips" role="radiogroup" aria-label="Playlist">
+          <button class="chip chip--active" data-value="video" role="radio" aria-checked="true">
+            &#127908; Solo este video
+          </button>
+          <button class="chip" data-value="playlist" role="radio" aria-checked="false">
+            &#128250; Playlist completa
+          </button>
+        </div>
+      </div>
     </section>
 
     <!-- ── Download Button ───────────────────────────────────────── -->
