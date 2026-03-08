@@ -1,16 +1,18 @@
-"""YouTube Downloader — FastAPI backend for Railway deployment.
+"""YouTube Downloader — FastAPI backend for Railway/Render deployment.
 
-Streams video/audio directly to the browser via yt-dlp (no temp files on disk).
+Downloads via yt-dlp to a temp file, streams to browser, then cleans up.
 Protected by API_KEY env variable.  Rate-limited to 5 req/min per IP.
 """
 
 import asyncio
+import glob
 import os
 import re
 import shutil
-import sys
+import tempfile
 import time
 from collections import defaultdict
+from pathlib import Path
 from typing import AsyncGenerator
 
 import yt_dlp
@@ -45,7 +47,6 @@ RATE_WINDOW = 60  # seconds
 def _check_rate(ip: str):
     now = time.time()
     hits = _rate[ip]
-    # prune old entries
     _rate[ip] = [t for t in hits if now - t < RATE_WINDOW]
     if len(_rate[ip]) >= RATE_LIMIT:
         raise HTTPException(429, "Rate limit exceeded — max 5 requests per minute")
@@ -68,12 +69,12 @@ def _fmt_duration(seconds: int | None) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-_SAFE_RE = re.compile(r'[^A-Za-z0-9._-]')
+_SAFE_RE = re.compile(r'[^A-Za-z0-9._\- ]')
 
 
 def _safe_filename(name: str, ext: str) -> str:
-    clean = _SAFE_RE.sub("_", name)[:120]
-    return f"{clean}.{ext}"
+    clean = _SAFE_RE.sub("_", name).strip("_")[:120]
+    return f"{clean}.{ext}" if clean else f"download.{ext}"
 
 
 # ── GET /api/info ────────────────────────────────────────────────────────────
@@ -100,7 +101,6 @@ async def api_info(
     is_pl = "entries" in info
     formats_raw = info.get("formats") or []
 
-    # Build a simplified list of available formats
     available = []
     seen = set()
     for f in formats_raw:
@@ -144,60 +144,76 @@ async def api_download(
     _check_key(key)
     _check_rate(request.client.host)
 
-    # Fetch title for Content-Disposition
-    def get_title():
-        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return info.get("title", "download")
-
-    try:
-        title = await asyncio.get_event_loop().run_in_executor(None, get_title)
-    except Exception:
-        title = "download"
-
     is_audio = format == "mp3"
-    filename = _safe_filename(title or "download", "mp3" if is_audio else "mp4")
-    media_type = "audio/mpeg" if is_audio else "video/mp4"
+    tmp_dir = tempfile.mkdtemp(prefix="ytdl_")
 
-    async def stream_response() -> AsyncGenerator[bytes, None]:
-        ytdlp_bin = shutil.which("yt-dlp")
-        cmd = [ytdlp_bin] if ytdlp_bin else [sys.executable, "-m", "yt_dlp"]
-
-        cmd += ["--quiet", "--no-warnings", "--no-playlist",
-                "--retries", "3", "-o", "-"]
+    def run_download() -> tuple[str, str]:
+        """Download to temp dir with yt-dlp, return (filepath, title)."""
+        outtmpl = os.path.join(tmp_dir, "%(title)s.%(ext)s")
+        opts: dict = {
+            "outtmpl": outtmpl,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "retries": 5,
+            "restrictfilenames": False,
+        }
 
         if is_audio:
-            cmd += ["--extract-audio", "--audio-format", "mp3",
-                    "--audio-quality", "192K"]
+            opts["format"] = "bestaudio/best"
+            opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }]
         else:
-            cmd += [
-                "-f",
+            opts["format"] = (
                 "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-                "bestvideo+bestaudio/best[ext=mp4]/best",
-                "--merge-output-format", "mp4",
-            ]
-        cmd.append(url)
+                "bestvideo+bestaudio/best[ext=mp4]/best"
+            )
+            opts["merge_output_format"] = "mp4"
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "download")
+
+        # Find the downloaded file (yt-dlp may change ext after postprocessing)
+        files = glob.glob(os.path.join(tmp_dir, "*"))
+        if not files:
+            raise RuntimeError("Download failed — no file produced")
+        filepath = files[0]
+        return filepath, title
+
+    try:
+        filepath, title = await asyncio.get_event_loop().run_in_executor(
+            None, run_download
         )
+    except Exception as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(500, f"Download failed: {exc}")
 
-        assert proc.stdout is not None
-        while True:
-            chunk = await proc.stdout.read(64 * 1024)
-            if not chunk:
-                break
-            yield chunk
+    actual_ext = Path(filepath).suffix.lstrip(".")
+    file_size = os.path.getsize(filepath)
+    filename = _safe_filename(title, actual_ext)
+    media_type = "audio/mpeg" if is_audio else "video/mp4"
 
-        await proc.wait()
+    async def stream_and_cleanup() -> AsyncGenerator[bytes, None]:
+        try:
+            with open(filepath, "rb") as f:
+                while True:
+                    chunk = f.read(256 * 1024)  # 256KB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return StreamingResponse(
-        stream_response(),
+        stream_and_cleanup(),
         media_type=media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(file_size),
             "Cache-Control": "no-store",
         },
     )

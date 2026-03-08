@@ -1,35 +1,39 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   YouTube Downloader — Frontend (FastAPI / Railway)
+   YouTube Downloader — Frontend (FastAPI + streaming progress)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 (() => {
   "use strict";
 
   /* ── State ──────────────────────────────────────────────────────────────── */
-  let format    = "mp4";
-  let videoInfo = null;
+  let format       = "mp4";
+  let videoInfo    = null;
+  let downloading  = false;
 
   /* ── DOM refs ───────────────────────────────────────────────────────────── */
   const $ = (s) => document.querySelector(s);
 
-  const apiKeyInput   = $("#apiKeyInput");
-  const urlInput      = $("#urlInput");
-  const pasteBtn      = $("#pasteBtn");
-  const infoBtn       = $("#infoBtn");
-  const previewCard   = $("#previewCard");
-  const infoLoader    = $("#infoLoader");
-  const formatChips   = $("#formatChips");
-  const downloadBtn   = $("#downloadBtn");
-  const dlBtnText     = $("#dlBtnText");
-  const themeToggle   = $("#themeToggle");
-  const toasts        = $("#toasts");
+  const apiKeyInput    = $("#apiKeyInput");
+  const urlInput       = $("#urlInput");
+  const pasteBtn       = $("#pasteBtn");
+  const infoBtn        = $("#infoBtn");
+  const previewCard    = $("#previewCard");
+  const infoLoader     = $("#infoLoader");
+  const formatChips    = $("#formatChips");
+  const downloadBtn    = $("#downloadBtn");
+  const dlBtnText      = $("#dlBtnText");
+  const progressCard   = $("#progressCard");
+  const progressFill   = $("#progressFill");
+  const progressPct    = $("#progressPct");
+  const progressSize   = $("#progressSize");
+  const progressStatus = $("#progressStatus");
+  const themeToggle    = $("#themeToggle");
+  const toasts         = $("#toasts");
 
   /* ── Init ───────────────────────────────────────────────────────────────── */
   function init() {
-    // Restore saved API key
     const savedKey = localStorage.getItem("apiKey");
     if (savedKey) apiKeyInput.value = savedKey;
-
     bindEvents();
   }
 
@@ -122,26 +126,106 @@
     });
   }
 
-  /* ── Download (triggers browser download via GET) ───────────────────────── */
-  function startDownload() {
+  /* ── Helpers ────────────────────────────────────────────────────────────── */
+  function fmtBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  /* ── Download with progress ─────────────────────────────────────────────── */
+  async function startDownload() {
+    if (downloading) return;
     const url = urlInput.value.trim();
     const key = getKey();
     if (!key) { toast("Ingresa tu API Key", "error"); return; }
     if (!url) { toast("Ingresa una URL", "error"); return; }
 
-    const params = new URLSearchParams({ url, format, key });
-    // Open in a new hidden iframe so the browser handles the file download
-    // without navigating away from the page
-    const downloadUrl = `/api/download?${params}`;
+    downloading = true;
+    downloadBtn.disabled = true;
+    dlBtnText.textContent = "Preparando…";
 
-    toast("Descarga iniciada — el archivo se descargará en tu navegador", "info");
+    // Show progress card in "preparing" state
+    progressCard.hidden = false;
+    progressFill.style.width = "0%";
+    progressPct.textContent = "—";
+    progressSize.textContent = "—";
+    progressStatus.textContent = "Preparando descarga… puede tardar unos segundos";
+    progressFill.classList.add("progress-fill--indeterminate");
 
-    const a = document.createElement("a");
-    a.href = downloadUrl;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+      const params = new URLSearchParams({ url, format, key });
+      const response = await fetch(`/api/download?${params}`);
+
+      if (!response.ok) {
+        let errMsg = "Error al descargar";
+        try {
+          const errData = await response.json();
+          errMsg = errData.detail || errMsg;
+        } catch { /* not JSON */ }
+        throw new Error(errMsg);
+      }
+
+      // Get filename from Content-Disposition header
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename="?([^";\n]+)"?/);
+      const filename = filenameMatch ? filenameMatch[1] : `download.${format}`;
+
+      // Get total size for progress
+      const contentLength = parseInt(response.headers.get("Content-Length") || "0", 10);
+
+      // Switch to download progress mode
+      progressFill.classList.remove("progress-fill--indeterminate");
+      progressStatus.textContent = `Descargando: ${filename}`;
+      dlBtnText.textContent = "Descargando…";
+
+      // Stream the response and track progress
+      const reader = response.body.getReader();
+      const chunks = [];
+      let received = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        chunks.push(value);
+        received += value.length;
+
+        if (contentLength > 0) {
+          const pct = Math.min(100, (received / contentLength) * 100);
+          progressFill.style.width = `${pct.toFixed(1)}%`;
+          progressPct.textContent = `${pct.toFixed(1)} %`;
+        }
+        progressSize.textContent = `${fmtBytes(received)}${contentLength ? ` / ${fmtBytes(contentLength)}` : ""}`;
+      }
+
+      // Build blob and trigger download
+      const blob = new Blob(chunks);
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+
+      // Done!
+      progressFill.style.width = "100%";
+      progressPct.textContent = "100 %";
+      progressStatus.textContent = `Completado: ${filename}`;
+      toast(`Descarga completada: ${filename}`, "success");
+
+    } catch (err) {
+      toast(err.message, "error");
+      progressStatus.textContent = `Error: ${err.message}`;
+      progressFill.classList.remove("progress-fill--indeterminate");
+    } finally {
+      downloading = false;
+      downloadBtn.disabled = false;
+      dlBtnText.textContent = "\u2B07 DESCARGAR";
+    }
   }
 
   /* ── Theme ──────────────────────────────────────────────────────────────── */
@@ -158,7 +242,6 @@
     }
   }
 
-  // Restore saved theme
   const saved = localStorage.getItem("theme");
   if (saved) document.documentElement.dataset.theme = saved;
 

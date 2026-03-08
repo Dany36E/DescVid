@@ -294,6 +294,14 @@ input  { font: inherit; border: none; background: none; color: inherit; outline:
   box-shadow: 0 0 18px var(--accent-glow), 0 0 36px rgba(255,45,45,0.2);
   transition: width 0.35s ease;
 }
+.progress-fill--indeterminate {
+  width: 40% !important;
+  animation: indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
 .progress__stats {
   display: flex; justify-content: space-between;
   margin-top: 10px; font-size: 13px; color: var(--text-2);

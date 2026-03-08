@@ -101,6 +101,18 @@
       <span class="dl-btn__ripple" aria-hidden="true"></span>
     </button>
 
+    <!-- ── Progress ──────────────────────────────────────────────── -->
+    <section class="card card--progress anim-entry" id="progressCard" hidden aria-label="Progreso de descarga">
+      <p class="progress__status" id="progressStatus">Preparando descarga…</p>
+      <div class="progress-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress__stats">
+        <span class="mono" id="progressPct">0 %</span>
+        <span class="mono" id="progressSize">—</span>
+      </div>
+    </section>
+
   </div>
 
   <!-- ── Toast container ─────────────────────────────────────────── -->
