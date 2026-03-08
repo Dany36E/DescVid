@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -55,17 +55,22 @@ async def _on_startup():
 
 
 def _base_ydl_opts() -> dict:
-    """Common yt-dlp options: cookies, headers, retries."""
+    """Common yt-dlp options: cookies, headers, retries, client bypass."""
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 10,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "mweb"],
+            }
+        },
         "http_headers": {
             "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/131.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_7 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                "Version/17.0 Mobile/15E148 Safari/604.1"
             ),
             "Accept-Language": "en-US,en;q=0.9",
         },
@@ -78,16 +83,19 @@ def _base_ydl_opts() -> dict:
 # ── Error messages ───────────────────────────────────────────────────────────
 
 _ERROR_MAP = [
-    ("Sign in to confirm", "YouTube requiere cookies. Configura la variable YT_COOKIES en Railway con el contenido de cookies.txt."),
+    ("Sign in to confirm", "YouTube bloqueó la petición (bot). Configura YT_COOKIES en las Variables de tu servicio con cookies.txt exportadas de tu navegador."),
     ("Video unavailable", "El video no está disponible. Puede ser privado o eliminado."),
     ("is not a valid URL", "La URL no es válida. Verifica e intenta de nuevo."),
     ("Geo-restricted", "Este video no está disponible en tu región."),
-    ("age-restricted", "Video restringido por edad. Necesitas cookies de una cuenta verificada."),
+    ("age-restricted", "Video restringido por edad. Necesitas cookies de una cuenta con edad verificada."),
     ("Private video", "Este video es privado."),
     ("has been removed", "Este video ha sido eliminado."),
     ("copyright", "Video bloqueado por derechos de autor."),
-    ("HTTP Error 403", "Acceso denegado. Intenta configurar cookies de autenticación."),
-    ("HTTP Error 429", "Demasiadas peticiones. Espera unos minutos e intenta de nuevo."),
+    ("HTTP Error 403", "Acceso denegado (403). Configura YT_COOKIES en Variables del servicio."),
+    ("HTTP Error 429", "Demasiadas peticiones a YouTube. Espera unos minutos e intenta de nuevo."),
+    ("Incomplete data", "YouTube envió datos incompletos. Intenta de nuevo en unos segundos."),
+    ("Unable to extract", "No se pudo extraer información. Intenta de nuevo o usa otra URL."),
+    ("timed out", "La conexión tardó demasiado. Intenta de nuevo."),
 ]
 
 
@@ -102,7 +110,7 @@ def _friendly_error(exc: Exception) -> str:
 # ── Rate limiter (5 req/min per IP, in-memory) ──────────────────────────────
 
 _rate: dict[str, list[float]] = defaultdict(list)
-RATE_LIMIT = 5
+RATE_LIMIT = 15
 RATE_WINDOW = 60  # seconds
 
 
@@ -157,45 +165,50 @@ async def api_info(
     _check_key(key)
     _check_rate(request.client.host)
 
-    def extract():
-        opts = _base_ydl_opts()
-        opts.update({"skip_download": True, "extract_flat": "in_playlist"})
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            return ydl.extract_info(url, download=False)
+    # Detect playlist URLs before extraction
+    is_playlist_url = "list=" in url
 
     def extract_video():
+        """Full extraction of single video — gets duration, thumbnail, etc."""
         opts = _base_ydl_opts()
         opts.update({"skip_download": True, "noplaylist": True})
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(url, download=False)
 
+    def extract_playlist():
+        """Flat extraction to count playlist items quickly."""
+        opts = _base_ydl_opts()
+        opts.update({"skip_download": True, "extract_flat": "in_playlist"})
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=False)
+
+    # Always get full video info first (provides duration, quality info, etc.)
     try:
-        info = await asyncio.get_event_loop().run_in_executor(None, extract)
+        video_info = await asyncio.get_event_loop().run_in_executor(None, extract_video)
     except Exception as exc:
         raise HTTPException(400, _friendly_error(exc))
 
-    is_pl = "entries" in info
-    playlist_count = len(list(info.get("entries") or [])) if is_pl else 0
-    playlist_title = info.get("title", "—") if is_pl else None
+    # If URL looks like a playlist, also get playlist metadata
+    is_pl = False
+    playlist_count = 0
+    playlist_title = None
 
-    # If it's a playlist URL, also fetch the individual video info
-    if is_pl:
+    if is_playlist_url:
         try:
-            video_info = await asyncio.get_event_loop().run_in_executor(None, extract_video)
+            pl_info = await asyncio.get_event_loop().run_in_executor(None, extract_playlist)
+            if "entries" in pl_info:
+                is_pl = True
+                playlist_count = len(list(pl_info.get("entries") or []))
+                playlist_title = pl_info.get("title", "—")
         except Exception:
-            video_info = None
-    else:
-        video_info = info
-
-    # Use video-level info for display, fall back to playlist info
-    display = video_info if video_info else info
+            pass  # playlist detection failed — show single video only
 
     return {
-        "title": display.get("title", "—"),
-        "channel": display.get("channel") or display.get("uploader", "—"),
-        "duration": display.get("duration") or 0,
-        "duration_str": _fmt_duration(display.get("duration")),
-        "thumbnail": display.get("thumbnail", ""),
+        "title": video_info.get("title", "—"),
+        "channel": video_info.get("channel") or video_info.get("uploader", "—"),
+        "duration": video_info.get("duration") or 0,
+        "duration_str": _fmt_duration(video_info.get("duration")),
+        "thumbnail": video_info.get("thumbnail", ""),
         "is_playlist": is_pl,
         "playlist_count": playlist_count,
         "playlist_title": playlist_title,

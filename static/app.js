@@ -132,7 +132,12 @@
       videoInfo = data;
       showPreview(data);
     } catch (err) {
-      toast(err.message, "error");
+      const msg = err.message;
+      toast(msg, "error");
+      // Show extra help for cookie-related errors
+      if (msg.includes("cookie") || msg.includes("Cookie") || msg.includes("bot") || msg.includes("403")) {
+        setTimeout(() => toast("💡 Ve a tu panel de Render/Railway → Variables → añade YT_COOKIES con el contenido de cookies.txt exportado desde tu navegador", "info"), 500);
+      }
     } finally {
       infoLoader.hidden = true;
       infoBtn.disabled  = false;
@@ -286,8 +291,12 @@
       toast(`Descarga completada: ${filename}`, "success");
 
     } catch (err) {
-      toast(err.message, "error");
-      progressStatus.textContent = `Error: ${err.message}`;
+      const msg = err.message;
+      toast(msg, "error");
+      if (msg.includes("cookie") || msg.includes("Cookie") || msg.includes("bot") || msg.includes("403")) {
+        setTimeout(() => toast("💡 Configura YT_COOKIES en las Variables del servicio para resolver este error", "info"), 500);
+      }
+      progressStatus.textContent = `Error: ${msg}`;
       progressFill.classList.remove("progress-fill--indeterminate");
     } finally {
       downloading = false;
