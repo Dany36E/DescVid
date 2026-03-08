@@ -7,8 +7,10 @@
 
   /* ── State ──────────────────────────────────────────────────────────────── */
   let format       = "mp4";
+  let quality      = "best";
   let videoInfo    = null;
-  let downloading  = false;  let noPlaylist   = true;  // default: solo este video
+  let downloading  = false;
+  let noPlaylist   = true;
   /* ── DOM refs ───────────────────────────────────────────────────────────── */
   const $ = (s) => document.querySelector(s);
 
@@ -31,12 +33,30 @@
   const playlistToggle = $("#playlistToggle");
   const playlistChips  = $("#playlistChips");
   const playlistLabel  = $("#playlistLabel");
+  const qualityChips   = $("#qualityChips");
+  const qualityGroup   = $("#qualityGroup");
+  const filenameGroup  = $("#filenameGroup");
+  const filenameInput  = $("#filenameInput");
+  const filenameExt    = $("#filenameExt");
+  const versionBadge   = $("#versionBadge");
+  const footerVersion  = $("#footerVersion");
 
   /* ── Init ───────────────────────────────────────────────────────────────── */
   function init() {
     const savedKey = localStorage.getItem("apiKey");
     if (savedKey) apiKeyInput.value = savedKey;
     bindEvents();
+    fetchVersion();
+  }
+
+  async function fetchVersion() {
+    try {
+      const r = await fetch("/api/version");
+      const data = await r.json();
+      const v = `v${data.version}`;
+      if (versionBadge) versionBadge.textContent = v;
+      if (footerVersion) footerVersion.textContent = v;
+    } catch { /* ignore */ }
   }
 
   function getKey() {
@@ -63,6 +83,17 @@
       noPlaylist = chip.dataset.value === "video";
       playlistChips.querySelectorAll(".chip").forEach((c) => {
         const active = c.dataset.value === chip.dataset.value;
+        c.classList.toggle("chip--active", active);
+        c.setAttribute("aria-checked", active);
+      });
+    });
+
+    qualityChips.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      quality = chip.dataset.value;
+      qualityChips.querySelectorAll(".chip").forEach((c) => {
+        const active = c.dataset.value === quality;
         c.classList.toggle("chip--active", active);
         c.setAttribute("aria-checked", active);
       });
@@ -143,6 +174,11 @@
     previewCard.classList.remove("anim-entry");
     void previewCard.offsetWidth;
     previewCard.classList.add("anim-entry");
+
+    // Show filename input pre-filled with video title
+    filenameInput.value = info.title || "";
+    filenameExt.textContent = `.${format}`;
+    filenameGroup.hidden = false;
   }
 
   /* ── Format chips ───────────────────────────────────────────────────────── */
@@ -153,6 +189,8 @@
       c.classList.toggle("chip--active", active);
       c.setAttribute("aria-checked", active);
     });
+    filenameExt.textContent = `.${f}`;
+    qualityGroup.style.display = f === "mp3" ? "none" : "";
   }
 
   /* ── Helpers ────────────────────────────────────────────────────────────── */
@@ -184,7 +222,8 @@
     progressFill.classList.add("progress-fill--indeterminate");
 
     try {
-      const params = new URLSearchParams({ url, format, no_playlist: noPlaylist, key });
+      const customName = filenameInput ? filenameInput.value.trim() : "";
+      const params = new URLSearchParams({ url, format, quality, no_playlist: noPlaylist, custom_name: customName, key });
       const response = await fetch(`/api/download?${params}`);
 
       if (!response.ok) {

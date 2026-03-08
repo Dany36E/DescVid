@@ -23,6 +23,7 @@
         <h1 class="header__title">YOUTUBE<span class="header__title--accent">DL</span></h1>
       </div>
       <div class="header__actions">
+        <span class="badge badge--ok" id="versionBadge">v—</span>
         <button class="theme-btn" id="themeToggle" aria-label="Toggle theme">
           <svg class="theme-btn__icon" id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/>
@@ -92,6 +93,23 @@
             </button>
           </div>
         </div>
+        <div class="option-group" id="qualityGroup">
+          <span class="option-group__label">Calidad video</span>
+          <div class="chip-group" id="qualityChips" role="radiogroup" aria-label="Calidad">
+            <button class="chip chip--active" data-value="best" role="radio" aria-checked="true">&#9733; Mejor</button>
+            <button class="chip" data-value="720" role="radio" aria-checked="false">HD 720p</button>
+            <button class="chip" data-value="480" role="radio" aria-checked="false">SD 480p</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filename edit -->
+      <div class="option-group option-group--full" id="filenameGroup" hidden>
+        <span class="option-group__label">Nombre del archivo</span>
+        <div class="filename-row">
+          <input type="text" id="filenameInput" class="url-input filename-input" placeholder="Nombre del archivo…" spellcheck="false" autocomplete="off">
+          <span class="filename-ext" id="filenameExt">.mp4</span>
+        </div>
       </div>
 
       <!-- Playlist toggle — solo visible si la URL es una playlist -->
@@ -131,7 +149,11 @@
         <span class="mono" id="progressSize">—</span>
       </div>
     </section>
-
+    <!-- ── Footer ────────────────────────────────────────────────────────── -->
+    <footer class="footer">
+      <p class="footer__version" id="footerVersion">v—</p>
+      <p class="footer__platforms">YouTube · Twitter/X · TikTok · Instagram · Facebook · +1000 sitios</p>
+    </footer>
   </div>
 
   <!-- ── Toast container ─────────────────────────────────────────── -->
