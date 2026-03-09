@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -38,44 +38,62 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Cookie support (YT_COOKIES env → temp file) ─────────────────────────────
+# ── Auth support (YT_COOKIES or YT_OAUTH2_TOKEN env vars) ───────────────────
 
 _cookies_file: str | None = None
+_oauth2_configured: bool = False
 
 
 @app.on_event("startup")
 async def _on_startup():
-    global _cookies_file
-    raw = os.environ.get("YT_COOKIES", "").strip()
-    if raw:
+    global _cookies_file, _oauth2_configured
+
+    # Option A: cookies.txt file content
+    raw_cookies = os.environ.get("YT_COOKIES", "").strip()
+    if raw_cookies:
         fd, path = tempfile.mkstemp(suffix=".txt", prefix="yt_cookies_")
         with os.fdopen(fd, "w") as f:
-            f.write(raw)
+            f.write(raw_cookies)
         _cookies_file = path
+
+    # Option B: OAuth2 token JSON (more stable — refresh_token is long-lived)
+    raw_oauth2 = os.environ.get("YT_OAUTH2_TOKEN", "").strip()
+    if raw_oauth2:
+        import json as _json
+        try:
+            _json.loads(raw_oauth2)  # validate JSON
+            cache_dir = Path.home() / ".cache" / "yt-dlp"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            (cache_dir / "youtube_oauth2_token.json").write_text(raw_oauth2)
+            _oauth2_configured = True
+        except Exception:
+            pass
 
 
 def _base_ydl_opts() -> dict:
-    """Common yt-dlp options: cookies, headers, retries, client bypass."""
+    """Common yt-dlp options: auth, headers, retries, client bypass."""
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 10,
-        # tv_embedded bypasses bot checks on datacenter IPs better than ios/mweb
+        # android+tv_embedded use separate API endpoints — more resistant to
+        # bot detection on datacenter IPs than the default web client.
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv_embedded", "ios", "web_creator"],
+                "player_client": ["android", "tv_embedded", "web_creator"],
                 "player_skip": ["webpage"],
             }
         },
-        # Let yt-dlp set per-client User-Agent; only override Accept-Language
         "http_headers": {
             "Accept-Language": "en-US,en;q=0.9",
         },
-        # Slight delay between requests to avoid rate-limit triggers
         "sleep_interval_requests": 1,
     }
-    if _cookies_file and os.path.isfile(_cookies_file):
+    if _oauth2_configured:
+        opts["username"] = "oauth2"
+        opts["password"] = ""
+    elif _cookies_file and os.path.isfile(_cookies_file):
         opts["cookiefile"] = _cookies_file
     return opts
 
@@ -83,7 +101,8 @@ def _base_ydl_opts() -> dict:
 # ── Error messages ───────────────────────────────────────────────────────────
 
 _ERROR_MAP = [
-    ("Sign in to confirm", "YouTube bloqueó la petición (bot). Configura YT_COOKIES en las Variables de tu servicio con cookies.txt exportadas de tu navegador."),
+    ("Sign in to confirm", "YouTube detectó el servidor como bot. Solución: agrega YT_OAUTH2_TOKEN o YT_COOKIES en las Variables de entorno de tu servicio en Render."),
+    ("Please sign in", "YouTube detectó el servidor como bot. Solución: agrega YT_OAUTH2_TOKEN o YT_COOKIES en las Variables de entorno de tu servicio en Render."),
     ("Video unavailable", "El video no está disponible. Puede ser privado o eliminado."),
     ("is not a valid URL", "La URL no es válida. Verifica e intenta de nuevo."),
     ("Geo-restricted", "Este video no está disponible en tu región."),
