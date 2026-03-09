@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.4.4"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -72,29 +72,38 @@ async def _on_startup():
 
 def _base_ydl_opts() -> dict:
     """Common yt-dlp options: auth, headers, retries, client bypass."""
+    has_cookies = bool(_cookies_file and os.path.isfile(_cookies_file))
+
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 10,
-        # android+tv_embedded use separate API endpoints — more resistant to
-        # bot detection on datacenter IPs than the default web client.
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "tv_embedded", "web_creator"],
-                "player_skip": ["webpage"],
-            }
-        },
         "http_headers": {
             "Accept-Language": "en-US,en;q=0.9",
         },
         "sleep_interval_requests": 1,
     }
-    if _oauth2_configured:
-        opts["username"] = "oauth2"
-        opts["password"] = ""
-    elif _cookies_file and os.path.isfile(_cookies_file):
+
+    if has_cookies:
+        # The 'web' client is the ONLY client that authenticates via cookiefile.
+        # android/tv_embedded use their own auth flows and ignore cookies.
+        opts["extractor_args"] = {
+            "youtube": {
+                "player_client": ["web"],
+            }
+        }
         opts["cookiefile"] = _cookies_file
+    else:
+        # No cookies: use android + tv_embedded which bypass bot checks
+        # better than 'web' on datacenter IPs.
+        opts["extractor_args"] = {
+            "youtube": {
+                "player_client": ["android", "tv_embedded", "web_creator"],
+                "player_skip": ["webpage"],
+            }
+        }
+
     return opts
 
 
