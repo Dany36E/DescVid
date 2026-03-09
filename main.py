@@ -6,6 +6,7 @@ Protected by API_KEY env variable.  Rate-limited to 5 req/min per IP.
 
 import asyncio
 import glob
+import logging
 import os
 import re
 import shutil
@@ -15,6 +16,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import AsyncGenerator
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("descvid")
+
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.4.5"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -48,26 +52,34 @@ _oauth2_configured: bool = False
 async def _on_startup():
     global _cookies_file, _oauth2_configured
 
-    # Option A: cookies.txt file content
     raw_cookies = os.environ.get("YT_COOKIES", "").strip()
     if raw_cookies:
         fd, path = tempfile.mkstemp(suffix=".txt", prefix="yt_cookies_")
         with os.fdopen(fd, "w") as f:
             f.write(raw_cookies)
         _cookies_file = path
+        logger.info("[startup] YT_COOKIES loaded: %d bytes → %s", len(raw_cookies), path)
+        # Verify the file is readable
+        try:
+            size = os.path.getsize(path)
+            logger.info("[startup] Cookie file written OK: %d bytes on disk", size)
+        except Exception as e:
+            logger.error("[startup] Cookie file error: %s", e)
+    else:
+        logger.warning("[startup] YT_COOKIES not set — bot detection bypass only")
 
-    # Option B: OAuth2 token JSON (more stable — refresh_token is long-lived)
     raw_oauth2 = os.environ.get("YT_OAUTH2_TOKEN", "").strip()
     if raw_oauth2:
         import json as _json
         try:
-            _json.loads(raw_oauth2)  # validate JSON
+            _json.loads(raw_oauth2)
             cache_dir = Path.home() / ".cache" / "yt-dlp"
             cache_dir.mkdir(parents=True, exist_ok=True)
             (cache_dir / "youtube_oauth2_token.json").write_text(raw_oauth2)
             _oauth2_configured = True
-        except Exception:
-            pass
+            logger.info("[startup] YT_OAUTH2_TOKEN loaded OK")
+        except Exception as e:
+            logger.error("[startup] YT_OAUTH2_TOKEN parse error: %s", e)
 
 
 def _base_ydl_opts() -> dict:
@@ -86,11 +98,11 @@ def _base_ydl_opts() -> dict:
     }
 
     if has_cookies:
-        # The 'web' client is the ONLY client that authenticates via cookiefile.
-        # android/tv_embedded use their own auth flows and ignore cookies.
+        # web_embedded + web both accept cookiefile.
+        # web_embedded has looser bot detection rules than plain web.
         opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["web"],
+                "player_client": ["web_embedded", "web"],
             }
         }
         opts["cookiefile"] = _cookies_file
@@ -180,6 +192,24 @@ def _safe_filename(name: str, ext: str) -> str:
 @app.get("/api/version")
 async def api_version():
     return {"version": APP_VERSION}
+
+
+# ── GET /api/debug (diagnóstico — protegido por API key) ─────────────────────
+
+@app.get("/api/debug")
+async def api_debug(key: str = Query(...)):
+    _check_key(key)
+    cookies_ok = bool(_cookies_file and os.path.isfile(_cookies_file))
+    cookies_size = os.path.getsize(_cookies_file) if cookies_ok else 0
+    env_cookies_len = len(os.environ.get("YT_COOKIES", ""))
+    return {
+        "version": APP_VERSION,
+        "cookies_file_set": _cookies_file is not None,
+        "cookies_file_exists": cookies_ok,
+        "cookies_file_bytes": cookies_size,
+        "env_YT_COOKIES_length": env_cookies_len,
+        "oauth2_configured": _oauth2_configured,
+    }
 
 
 # ── GET /api/info ────────────────────────────────────────────────────────────
