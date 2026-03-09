@@ -6,6 +6,7 @@ Protected by API_KEY env variable.  Rate-limited to 5 req/min per IP.
 
 import asyncio
 import glob
+import io
 import logging
 import os
 import re
@@ -27,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -120,9 +121,8 @@ def _base_ydl_opts() -> dict:
         opts["extractor_args"] = {
             "youtube": {
                 "player_client": ["mweb"],
-                # Skip fetching the HTML page — use innertube API directly.
-                # Fewer requests = less surface for bot detection.
-                "player_skip": ["webpage"],
+                # Do NOT skip webpage: mweb needs it to build the SAPISIDHASH
+                # auth header from the SAPISID cookie.
             }
         }
         opts["cookiefile"] = _cookies_file
@@ -159,6 +159,7 @@ _ERROR_MAP = [
 
 def _friendly_error(exc: Exception) -> str:
     msg = str(exc)
+    logger.error("[yt-dlp raw error] %s", msg)  # visible in Render logs
     for pattern, friendly in _ERROR_MAP:
         if pattern.lower() in msg.lower():
             return friendly
@@ -233,6 +234,33 @@ async def api_debug(key: str = Query(...)):
         "cookies_first_line": first_line,
         "oauth2_configured": _oauth2_configured,
     }
+
+
+# ── GET /api/rawtest (captures raw yt-dlp verbose output — debug only) ────────
+
+@app.get("/api/rawtest")
+async def api_rawtest(url: str = Query(...), key: str = Query(...)):
+    _check_key(key)
+    buf = io.StringIO()
+    opts = _base_ydl_opts()
+    opts.update({
+        "skip_download": True,
+        "noplaylist": True,
+        "quiet": False,
+        "verbose": True,
+        "logger": type("L", (), {
+            "debug": lambda s, m: buf.write(f"[debug] {m}\n"),
+            "info": lambda s, m: buf.write(f"[info] {m}\n"),
+            "warning": lambda s, m: buf.write(f"[warn] {m}\n"),
+            "error": lambda s, m: buf.write(f"[error] {m}\n"),
+        })(),
+    })
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        return {"status": "ok", "title": info.get("title"), "log": buf.getvalue()[-4000:]}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)[:500], "log": buf.getvalue()[-4000:]}
 
 
 # ── GET /api/info ────────────────────────────────────────────────────────────
