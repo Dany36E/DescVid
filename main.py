@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.5"
+APP_VERSION = "1.4.6"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -54,15 +54,17 @@ async def _on_startup():
 
     raw_cookies = os.environ.get("YT_COOKIES", "").strip()
     if raw_cookies:
+        # Render sometimes stores literal \n instead of real newlines — fix both
+        raw_cookies = raw_cookies.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
         fd, path = tempfile.mkstemp(suffix=".txt", prefix="yt_cookies_")
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", newline="\n") as f:
             f.write(raw_cookies)
         _cookies_file = path
-        logger.info("[startup] YT_COOKIES loaded: %d bytes → %s", len(raw_cookies), path)
-        # Verify the file is readable
+        logger.info("[startup] YT_COOKIES loaded: %d chars → %s", len(raw_cookies), path)
         try:
             size = os.path.getsize(path)
-            logger.info("[startup] Cookie file written OK: %d bytes on disk", size)
+            lines = raw_cookies.count("\n")
+            logger.info("[startup] Cookie file OK: %d bytes, %d lines", size, lines)
         except Exception as e:
             logger.error("[startup] Cookie file error: %s", e)
     else:
