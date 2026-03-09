@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.8"
+APP_VERSION = "1.4.9"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -54,15 +54,21 @@ async def _on_startup():
 
     raw_cookies = os.environ.get("YT_COOKIES", "").strip()
     if raw_cookies:
-        from urllib.parse import unquote
-        # Render sometimes URL-encodes the value (%09 for tab, %0A for newline, etc.)
-        # Decode if it looks encoded (heuristic: contains %09 tab or %0A newline)
-        if "%09" in raw_cookies or "%0A" in raw_cookies or "%0D" in raw_cookies:
-            raw_cookies = unquote(raw_cookies)
-        # Normalize line endings (literal \n → real newline, CRLF → LF)
-        raw_cookies = raw_cookies.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
-        # Normalize tabs (literal \t → real tab)
-        raw_cookies = raw_cookies.replace("\\t", "\t")
+        # Render may percent-encode the structural characters of the Netscape
+        # cookie file (%09 = tab field separator, %0A/%0D = line ending).
+        # ONLY replace those — do NOT full-unquote, as cookie VALUES may contain
+        # intentional %3D, %2F etc. that must stay as-is for yt-dlp.
+        raw_cookies = (
+            raw_cookies
+            .replace("%09", "\t")   # restore tab field separators
+            .replace("%0D%0A", "\n") # CRLF → LF
+            .replace("%0D", "\n")   # bare CR → LF
+            .replace("%0A", "\n")   # LF
+            .replace("\\n", "\n")   # literal \n escape
+            .replace("\\t", "\t")   # literal \t escape
+            .replace("\r\n", "\n")  # CRLF → LF
+            .replace("\r", "\n")    # bare CR → LF
+        )
         fd, path = tempfile.mkstemp(suffix=".txt", prefix="yt_cookies_")
         with os.fdopen(fd, "w", newline="\n") as f:
             f.write(raw_cookies)
