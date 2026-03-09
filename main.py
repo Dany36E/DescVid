@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.7"
+APP_VERSION = "1.4.8"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -103,11 +103,11 @@ def _base_ydl_opts() -> dict:
     }
 
     if has_cookies:
-        # web_embedded + web both accept cookiefile.
-        # web_embedded has looser bot detection rules than plain web.
+        # Only 'web' client fully supports user auth via cookiefile.
+        # web_embedded is for embedded players and ignores user session cookies.
         opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["web_embedded", "web"],
+                "player_client": ["web"],
             }
         }
         opts["cookiefile"] = _cookies_file
