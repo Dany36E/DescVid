@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.9"
+APP_VERSION = "1.5.0"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -94,7 +94,16 @@ async def _on_startup():
 
 
 def _base_ydl_opts() -> dict:
-    """Common yt-dlp options: auth, headers, retries, client bypass."""
+    """Common yt-dlp options: auth, retries, client selection.
+
+    Client strategy:
+    - With cookies: use 'mweb' (mobile YouTube). It is a web client so it
+      reads the cookiefile, but unlike 'web' it does NOT require a Proof of
+      Origin (PO) token from a real browser — the mobile endpoint skips that
+      check.  This is the critical difference that lets it work on server IPs.
+    - Without cookies: use 'android' + 'tv_embedded'.  These are API-level
+      clients with their own non-web auth and are not subject to PO tokens.
+    """
     has_cookies = bool(_cookies_file and os.path.isfile(_cookies_file))
 
     opts: dict = {
@@ -105,24 +114,22 @@ def _base_ydl_opts() -> dict:
         "http_headers": {
             "Accept-Language": "en-US,en;q=0.9",
         },
-        "sleep_interval_requests": 1,
     }
 
     if has_cookies:
-        # Only 'web' client fully supports user auth via cookiefile.
-        # web_embedded is for embedded players and ignores user session cookies.
         opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["web"],
+                "player_client": ["mweb"],
+                # Skip fetching the HTML page — use innertube API directly.
+                # Fewer requests = less surface for bot detection.
+                "player_skip": ["webpage"],
             }
         }
         opts["cookiefile"] = _cookies_file
     else:
-        # No cookies: use android + tv_embedded which bypass bot checks
-        # better than 'web' on datacenter IPs.
         opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["android", "tv_embedded", "web_creator"],
+                "player_client": ["android", "tv_embedded"],
                 "player_skip": ["webpage"],
             }
         }
