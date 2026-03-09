@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
