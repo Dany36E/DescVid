@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -61,19 +61,19 @@ def _base_ydl_opts() -> dict:
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 10,
+        # tv_embedded bypasses bot checks on datacenter IPs better than ios/mweb
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "mweb"],
+                "player_client": ["tv_embedded", "ios", "web_creator"],
+                "player_skip": ["webpage"],
             }
         },
+        # Let yt-dlp set per-client User-Agent; only override Accept-Language
         "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_7 like Mac OS X) "
-                "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-                "Version/17.0 Mobile/15E148 Safari/604.1"
-            ),
             "Accept-Language": "en-US,en;q=0.9",
         },
+        # Slight delay between requests to avoid rate-limit triggers
+        "sleep_interval_requests": 1,
     }
     if _cookies_file and os.path.isfile(_cookies_file):
         opts["cookiefile"] = _cookies_file
