@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.6"
+APP_VERSION = "1.4.7"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -54,19 +54,22 @@ async def _on_startup():
 
     raw_cookies = os.environ.get("YT_COOKIES", "").strip()
     if raw_cookies:
-        # Render sometimes stores literal \n instead of real newlines — fix both
+        from urllib.parse import unquote
+        # Render sometimes URL-encodes the value (%09 for tab, %0A for newline, etc.)
+        # Decode if it looks encoded (heuristic: contains %09 tab or %0A newline)
+        if "%09" in raw_cookies or "%0A" in raw_cookies or "%0D" in raw_cookies:
+            raw_cookies = unquote(raw_cookies)
+        # Normalize line endings (literal \n → real newline, CRLF → LF)
         raw_cookies = raw_cookies.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+        # Normalize tabs (literal \t → real tab)
+        raw_cookies = raw_cookies.replace("\\t", "\t")
         fd, path = tempfile.mkstemp(suffix=".txt", prefix="yt_cookies_")
         with os.fdopen(fd, "w", newline="\n") as f:
             f.write(raw_cookies)
         _cookies_file = path
-        logger.info("[startup] YT_COOKIES loaded: %d chars → %s", len(raw_cookies), path)
-        try:
-            size = os.path.getsize(path)
-            lines = raw_cookies.count("\n")
-            logger.info("[startup] Cookie file OK: %d bytes, %d lines", size, lines)
-        except Exception as e:
-            logger.error("[startup] Cookie file error: %s", e)
+        size = os.path.getsize(path)
+        first_line = raw_cookies.split("\n", 1)[0][:60]
+        logger.info("[startup] YT_COOKIES → %d bytes, first line: %r", size, first_line)
     else:
         logger.warning("[startup] YT_COOKIES not set — bot detection bypass only")
 
@@ -204,12 +207,17 @@ async def api_debug(key: str = Query(...)):
     cookies_ok = bool(_cookies_file and os.path.isfile(_cookies_file))
     cookies_size = os.path.getsize(_cookies_file) if cookies_ok else 0
     env_cookies_len = len(os.environ.get("YT_COOKIES", ""))
+    first_line = ""
+    if cookies_ok:
+        with open(_cookies_file, "r", errors="replace") as f:
+            first_line = f.readline().strip()[:80]
     return {
         "version": APP_VERSION,
         "cookies_file_set": _cookies_file is not None,
         "cookies_file_exists": cookies_ok,
         "cookies_file_bytes": cookies_size,
         "env_YT_COOKIES_length": env_cookies_len,
+        "cookies_first_line": first_line,
         "oauth2_configured": _oauth2_configured,
     }
 
