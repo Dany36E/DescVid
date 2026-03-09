@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 API_KEY = os.environ.get("API_KEY", "changeme")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
@@ -251,21 +251,13 @@ async def api_download(
             }]
         else:
             quality_map = {
-                "best": (
-                    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-                    "bestvideo+bestaudio/best[ext=mp4]/best"
-                ),
-                "720": (
-                    "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/"
-                    "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
-                ),
-                "480": (
-                    "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/"
-                    "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
-                ),
+                "best": "bestvideo+bestaudio/best",
+                "720": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+                "480": "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
             }
             opts["format"] = quality_map.get(quality, quality_map["best"])
             opts["merge_output_format"] = "mp4"
+            opts["format_sort"] = ["ext:mp4:m4a", "res", "codec:h264"]
 
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
