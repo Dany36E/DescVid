@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Authenticate GitHub CLI
-        run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+        run: echo "$GH_TOKEN" | gh auth login --with-token
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
